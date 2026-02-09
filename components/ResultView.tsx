@@ -10,6 +10,7 @@ interface ResultViewProps {
 
 const ResultView: React.FC<ResultViewProps> = ({ result, request, onReset }) => {
   const [submittedContact, setSubmittedContact] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [showDscrDetails, setShowDscrDetails] = useState(false);
   const [contactInfo, setContactInfo] = useState({ name: '', email: '', phone: '' });
 
@@ -17,39 +18,103 @@ const ResultView: React.FC<ResultViewProps> = ({ result, request, onReset }) => 
   const hasLiquidityShortfall = result.reserves < result.requiredReserves;
   const estimatedLoanAmount = request.asIsValue * result.ltv;
   
-  const checklistItems = [
-    "Government Issued Photo ID",
-    "LLC Entity Documents",
-    request.loanPurpose === LoanPurpose.PURCHASE ? "Fully Executed Purchase Contract" : "Current Mortgage Payoff Statement",
-    "2 Most Recent Bank Statements (Full)",
-    "Lease Agreement (or Rent Roll if Multi-unit)",
-  ].filter(Boolean);
-
   const handleContactSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmittedContact(true);
+    setIsSubmitting(true);
+
+    const templateParams = {
+      name: contactInfo.name,
+      email: contactInfo.email,
+      phone: contactInfo.phone,
+      property_type: request.assetType,
+      zip_code: request.zipCode,
+      state: request.propertyState,
+      loan_purpose: `${request.loanPurpose}${request.isCashOut ? ' (Cash Out)' : ''}`,
+      property_value: `$${request.asIsValue.toLocaleString()}`,
+      estimated_loan: `$${estimatedLoanAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
+      ltv: `${(result.ltv * 100).toFixed(0)}%`,
+      dscr: `${result.dscr.toFixed(2)}x`,
+      ai_summary: result.analysis.narrativeSummary,
+    };
+
+    try {
+      // EmailJS is loaded globally via script tag in index.html
+      // @ts-ignore
+      await window.emailjs.send(
+        'service_y6p4adn',
+        'template_xg8v06m',
+        templateParams,
+        'MIZgi2SZdJIoRSsJM'
+      );
+      setSubmittedContact(true);
+    } catch (error) {
+      console.error('EmailJS Error:', error);
+      alert('There was an issue sending your request. Please try again or contact us directly.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const HelpForm = () => (
+  // Helper function to render the contact form
+  const renderContactSection = () => (
     <div className="bg-indigo-600 rounded-2xl shadow-xl text-white p-8">
       {!submittedContact ? (
-        <form onSubmit={handleContactSubmit} className="space-y-4 text-left">
+        <form 
+          onSubmit={handleContactSubmit} 
+          className="space-y-4 text-left"
+        >
           <h4 className="text-xl font-bold text-center">Let's see how we can help!</h4>
           <p className="text-sm text-indigo-100 text-center leading-relaxed">Connect with a specialist to find the best loan structure for your goals.</p>
+          
           <div className="space-y-3 mt-6">
-            <input required type="text" placeholder="Full Name" className="w-full px-4 py-2.5 rounded-lg bg-white/10 border border-white/20 text-white placeholder-white/40 text-sm outline-none focus:ring-2 focus:ring-white/50 transition-all" value={contactInfo.name} onChange={e => setContactInfo({...contactInfo, name: e.target.value})} />
-            <input required type="email" placeholder="Email Address" className="w-full px-4 py-2.5 rounded-lg bg-white/10 border border-white/20 text-white placeholder-white/40 text-sm outline-none focus:ring-2 focus:ring-white/50 transition-all" value={contactInfo.email} onChange={e => setContactInfo({...contactInfo, email: e.target.value})} />
-            <input required type="tel" placeholder="Cell Phone" className="w-full px-4 py-2.5 rounded-lg bg-white/10 border border-white/20 text-white placeholder-white/40 text-sm outline-none focus:ring-2 focus:ring-white/50 transition-all" value={contactInfo.phone} onChange={e => setContactInfo({...contactInfo, phone: e.target.value})} />
+            <input 
+              required 
+              type="text" 
+              name="name"
+              placeholder="Full Name" 
+              className="w-full px-4 py-2.5 rounded-lg bg-white/10 border border-white/20 text-white placeholder-white/40 text-sm outline-none focus:ring-2 focus:ring-white/50 transition-all" 
+              value={contactInfo.name} 
+              onChange={e => setContactInfo({...contactInfo, name: e.target.value})} 
+            />
+            <input 
+              required 
+              type="email" 
+              name="email"
+              placeholder="Email Address" 
+              className="w-full px-4 py-2.5 rounded-lg bg-white/10 border border-white/20 text-white placeholder-white/40 text-sm outline-none focus:ring-2 focus:ring-white/50 transition-all" 
+              value={contactInfo.email} 
+              onChange={e => setContactInfo({...contactInfo, email: e.target.value})} 
+            />
+            <input 
+              required 
+              type="tel" 
+              name="phone"
+              placeholder="Cell Phone" 
+              className="w-full px-4 py-2.5 rounded-lg bg-white/10 border border-white/20 text-white placeholder-white/40 text-sm outline-none focus:ring-2 focus:ring-white/50 transition-all" 
+              value={contactInfo.phone} 
+              onChange={e => setContactInfo({...contactInfo, phone: e.target.value})} 
+            />
           </div>
-          <button type="submit" className="w-full bg-white text-indigo-600 py-4 rounded-xl font-extrabold hover:bg-indigo-50 transition shadow-2xl flex items-center justify-center gap-2 mt-4 active:scale-95">
-            Connect with a Specialist
+          
+          <button 
+            type="submit" 
+            disabled={isSubmitting}
+            className="w-full bg-white text-indigo-600 py-4 rounded-xl font-extrabold hover:bg-indigo-50 transition shadow-2xl flex items-center justify-center gap-2 mt-4 active:scale-95 disabled:opacity-70"
+          >
+            {isSubmitting ? 'Sending...' : 'Connect with a Specialist'}
           </button>
         </form>
       ) : (
         <div className="py-12 space-y-4 animate-in fade-in zoom-in duration-500 text-center">
-          <div className="w-16 h-16 bg-emerald-400 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg"><svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg></div>
-          <h4 className="text-2xl font-bold">Deal Sent to Desk</h4>
-          <p className="text-indigo-100 max-w-xs mx-auto text-sm">Our specialists will review your ${estimatedLoanAmount.toLocaleString(undefined, {maximumFractionDigits: 0})} scenario immediately.</p>
+          <div className="w-16 h-16 bg-emerald-400 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
+            <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <h4 className="text-2xl font-bold">Inquiry Sent to the Domus Team</h4>
+          <p className="text-indigo-100 max-w-xs mx-auto text-sm leading-relaxed">
+            Your deal scenario has been dispatched successfully. The Domus team will review the numbers and follow up with you at <strong>{contactInfo.email}</strong> shortly.
+          </p>
         </div>
       )}
     </div>
@@ -61,14 +126,16 @@ const ResultView: React.FC<ResultViewProps> = ({ result, request, onReset }) => 
         <div className="bg-slate-800 text-white p-8 rounded-2xl shadow-xl border border-slate-700">
           <div className="flex justify-between items-center mb-6">
             <h3 className="text-2xl font-bold">Underwriting Result</h3>
-            <div className="bg-rose-900/50 px-4 py-2 rounded-lg border border-rose-500/50"><span className="text-lg font-black uppercase text-rose-400">Declined</span></div>
+            <div className="bg-rose-900/50 px-4 py-2 rounded-lg border border-rose-500/50">
+              <span className="text-lg font-black uppercase text-rose-400">Declined</span>
+            </div>
           </div>
           <div className="p-5 bg-rose-950/40 border border-rose-500/30 rounded-xl">
             <h4 className="text-xs font-black uppercase tracking-widest text-rose-400 mb-3">Critical Declines</h4>
             <p className="text-lg font-medium text-white leading-relaxed">{result.reasoning}</p>
           </div>
         </div>
-        <HelpForm />
+        {renderContactSection()}
         <button onClick={onReset} className="w-full text-slate-500 font-bold py-4">← Try another scenario</button>
       </div>
     );
@@ -91,7 +158,6 @@ const ResultView: React.FC<ResultViewProps> = ({ result, request, onReset }) => 
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="space-y-8">
-          {/* Deal Health & Risks */}
           <div className="bg-white p-8 rounded-2xl shadow-xl border border-slate-200 space-y-6">
             <h3 className="text-indigo-600 font-bold text-sm uppercase tracking-wide border-b pb-2">Analysis Findings</h3>
             
@@ -173,7 +239,7 @@ const ResultView: React.FC<ResultViewProps> = ({ result, request, onReset }) => 
               
               {request.isCashOut && (
                 <div className="flex justify-between items-center py-2 border-b border-slate-100 bg-indigo-50/30 px-3 rounded-lg">
-                  <span className="text-indigo-700 text-sm font-bold">Est. Net Proceeds</span>
+                  <span className="text-indigo-700 text-sm font-bold">Cash to Borrower</span>
                   <span className="font-black text-indigo-800 text-lg">${Math.round(result.estimatedCashOut || 0).toLocaleString()}</span>
                 </div>
               )}
@@ -203,7 +269,7 @@ const ResultView: React.FC<ResultViewProps> = ({ result, request, onReset }) => 
               )}
             </div>
           </div>
-          <HelpForm />
+          {renderContactSection()}
         </div>
       </div>
 

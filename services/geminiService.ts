@@ -10,7 +10,7 @@ export const analyzeDealWithAI = async (
   dscr: number,
   totalMonthlyPayment: number
 ): Promise<AnalysisResult> => {
-  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const loanAmount = request.asIsValue * ltv;
 
@@ -26,9 +26,13 @@ export const analyzeDealWithAI = async (
     NARRATIVE GUIDELINES:
     - Do NOT recite the loan program rules or LTV matrices.
     - Focus on the STRENGTHS (e.g., high liquidity, strong rent-to-value, low leverage).
-    - Focus on the RISKS (e.g., market volatility in ${request.propertyState}, tight DSCR, vacant units).
-    - Provide a qualitative summary of the DEAL itself, not the manual.
-    - If you see potential issues (like low FICO or geographic challenges), mention them as "Red Flags".
+    - Focus on the RISKS (e.g., market volatility, tight DSCR).
+    - Provide a qualitative summary of the DEAL itself.
+    
+    SPECIAL INSTRUCTION ON RENT RISK:
+    - If the inputted rent ($${request.monthlyRent.toLocaleString()}) results in a very high DSCR (>1.50x) or seems high for the area, do NOT talk about "implied benchmarks". 
+    - Instead, flag the specific risk: "The appraisal may return a lower market rent than inputted, which would reduce the DSCR and potentially cut the loan amount."
+    - If you see potential issues, mention them as "Red Flags".
 
     DEAL DATA:
     - Loan Amt: $${loanAmount.toLocaleString()}
@@ -43,7 +47,7 @@ export const analyzeDealWithAI = async (
     {
       "narrativeSummary": "A 2-3 sentence overview of the deal's viability based on market and credit metrics.",
       "whatsWorking": ["Specific asset or borrower strengths"],
-      "redFlags": ["Qualitative risks identified from market or data"],
+      "redFlags": ["Qualitative risks identified from market or data. Include 'Appraisal Rent Risk' if rents seem aggressive."],
       "deepDiveAreas": ["Items that need more scrutiny"],
       "improvementChecklist": ["Practical advice to strengthen the deal"]
     }

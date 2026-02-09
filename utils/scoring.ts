@@ -43,7 +43,23 @@ export const calculateDSCRUnderwriting = (data: LoanRequest): UnderwritingResult
   if (effectiveFico >= 780) baseMaxLtv = 0.80;
   else if (effectiveFico >= 700) baseMaxLtv = 0.75;
   else if (effectiveFico >= 680) baseMaxLtv = 0.70;
-  else if (effectiveFico >= 660) baseMaxLtv = 0.65;
+  else if (effectiveFico >= 660) {
+    // Default base for 660-679 is 65%
+    baseMaxLtv = 0.65;
+    
+    // Check for special tier: $150k - $1.5MM, DSCR >= 1.00
+    // We check eligibility at the higher target LTVs
+    const targetLtv = data.loanPurpose === LoanPurpose.PURCHASE 
+      ? (isMultiUnit ? 0.70 : 0.75) 
+      : 0.70;
+      
+    const testMetrics = getMetrics(targetLtv);
+    const inLoanRange = testMetrics.loanAmt >= 150000 && testMetrics.loanAmt <= 1500000;
+    
+    if (testMetrics.dscr >= 1.0 && inLoanRange) {
+      baseMaxLtv = targetLtv;
+    }
+  }
 
   let currentLtv = baseMaxLtv;
   let metrics = getMetrics(currentLtv);
@@ -56,6 +72,11 @@ export const calculateDSCRUnderwriting = (data: LoanRequest): UnderwritingResult
       cashOutLtvCap = 0.70;
     }
     
+    // For 660-679 specifically, Cash Out is capped at 70% as per user requirements
+    if (effectiveFico >= 660 && effectiveFico <= 679) {
+      cashOutLtvCap = 0.70;
+    }
+
     currentLtv = Math.min(currentLtv, cashOutLtvCap);
     metrics = getMetrics(currentLtv);
 
@@ -83,7 +104,6 @@ export const calculateDSCRUnderwriting = (data: LoanRequest): UnderwritingResult
   } else if (metrics.loanAmt > 2000000) {
     requiredMonths = 12;
   } else if (data.isShortTermRental && metrics.loanAmt > 2000000) {
-    // Redundant check but strictly following user prompt phrasing
     requiredMonths = 12;
   }
   
@@ -92,7 +112,23 @@ export const calculateDSCRUnderwriting = (data: LoanRequest): UnderwritingResult
     warnings.push(`Liquidity: $${Math.round(requiredReserves - data.liquidity).toLocaleString()} reserve shortfall.`);
   }
 
-  // 5. Final Floor Checks
+  // 5. Sensitivity Calculation (LTV for DSCR 1.00)
+  let ltvForDscr1: number | null = null;
+  if (metrics.dscr >= 0.8 && metrics.dscr < 1.0) {
+    const fixedExpenses = data.monthlyTax + data.monthlyInsurance + data.monthlyHoa;
+    const targetPI = data.monthlyRent - fixedExpenses;
+    
+    if (targetPI > 0) {
+      const monthlyRate = CALC_RATE / 12;
+      const factor = (1 - Math.pow(1 + monthlyRate, -AMORT_MONTHS)) / monthlyRate;
+      const maxLoanForDscr1 = targetPI * factor;
+      ltvForDscr1 = maxLoanForDscr1 / data.asIsValue;
+    } else {
+      ltvForDscr1 = 0;
+    }
+  }
+
+  // 6. Final Floor Checks
   if (metrics.dscr < 0.75) {
     failures.push("DSCR below 0.75x floor.");
     currentLtv = 0;
@@ -117,7 +153,11 @@ export const calculateDSCRUnderwriting = (data: LoanRequest): UnderwritingResult
     ioEligible: effectiveFico >= 780 && metrics.dscr >= 1.0,
     documentChecklist: [],
     analysis: { narrativeSummary: '', whatsWorking: [], redFlags: [], deepDiveAreas: [], improvementChecklist: [] },
-    sensitivity: { baseDscr: metrics.dscr, rateForDscr1: null, ltvForDscr1: null },
+    sensitivity: { 
+      baseDscr: metrics.dscr, 
+      rateForDscr1: null, 
+      ltvForDscr1 
+    },
     estimatedCashOut: isCashOut ? Math.max(0, metrics.loanAmt - (data.payoffAmount || 0) - (metrics.loanAmt * 0.02)) : 0
   };
 };
