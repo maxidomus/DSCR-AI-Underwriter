@@ -117,9 +117,9 @@ const App: React.FC = () => {
             {!isEmbed && (
               <div className="text-center space-y-4 max-w-2xl mx-auto animate-in">
                 <h2 className="text-4xl md:text-5xl font-extrabold text-slate-900 leading-tight tracking-tight">
-                  Get a <span className="text-indigo-600 underline decoration-indigo-200 decoration-8 underline-offset-4">Quick Lender Read</span>
+                  Get an <span className="text-indigo-600 underline decoration-indigo-200 decoration-8 underline-offset-4 whitespace-nowrap">immediate quote</span> with actual rate and terms
                 </h2>
-                <p className="text-lg text-slate-600 font-medium">Instant analysis of cash-flow, leverage, and qualifying potential.</p>
+                <p className="text-lg text-slate-600 font-medium">Instant analysis of cash-flow, leverage, and direct matrix pricing.</p>
               </div>
             )}
             <DealForm key={formKey} onSubmit={handleDealSubmit} isLoading={loading} />

@@ -10,7 +10,7 @@ export const analyzeDealWithAI = async (
   dscr: number,
   totalMonthlyPayment: number
 ): Promise<AnalysisResult> => {
- const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const loanAmount = request.asIsValue * ltv;
 
@@ -25,10 +25,17 @@ export const analyzeDealWithAI = async (
 
     NARRATIVE GUIDELINES:
     - Do NOT recite the loan program rules or LTV matrices.
-    - Focus on the STRENGTHS (e.g., high liquidity, strong rent-to-value, low leverage).
+    - Mention that current DSCR and payment figures are calculated using a baseline 7.00% interest rate for analysis purposes.
+    - Explicitly state that the user must submit the "Soft Quote" form to unlock their actual interest rate based on our real-time pricing matrix.
+    - Focus on the STRENGTHS (e.g., strong rent-to-value, low leverage, property type stability).
     - Focus on the RISKS (e.g., market volatility, tight DSCR).
     - Provide a qualitative summary of the DEAL itself.
     
+    SPECIAL INSTRUCTION ON LIQUIDITY:
+    - We are NOT collecting borrower liquidity/cash position at this stage. 
+    - Do NOT mention borrower liquidity, cash reserves, or "strong cash position" in your analysis. 
+    - Focus strictly on the property and the deal economics.
+
     SPECIAL INSTRUCTION ON RENT RISK:
     - If the inputted rent ($${request.monthlyRent.toLocaleString()}) results in a very high DSCR (>1.50x) or seems high for the area, do NOT talk about "implied benchmarks". 
     - Instead, flag the specific risk: "The appraisal may return a lower market rent than inputted, which would reduce the DSCR and potentially cut the loan amount."
@@ -39,15 +46,14 @@ export const analyzeDealWithAI = async (
     - Asset: ${request.assetType}
     - Location: ${request.zipCode}, ${request.propertyState}
     - Purpose: ${request.loanPurpose}
-    - Calculated DSCR: ${dscr.toFixed(2)}x
-    - Reserve Position: $${request.liquidity.toLocaleString()}
+    - Calculated DSCR: ${dscr.toFixed(2)}x (assumed @ 7.00%)
     - STR Deal: ${request.isShortTermRental ? 'Yes' : 'No'}
 
     OUTPUT SCHEMA:
     {
-      "narrativeSummary": "A 2-3 sentence overview of the deal's viability based on market and credit metrics.",
-      "whatsWorking": ["Specific asset or borrower strengths"],
-      "redFlags": ["Qualitative risks identified from market or data. Include 'Appraisal Rent Risk' if rents seem aggressive."],
+      "narrativeSummary": "A 2-3 sentence overview of the deal's viability. MUST mention the 7% rate assumption and the need to submit for real pricing. NO LIQUIDITY MENTIONS.",
+      "whatsWorking": ["Specific asset or deal strengths. NO LIQUIDITY MENTIONS."],
+      "redFlags": ["Qualitative risks identified from market or data. Include 'Appraisal Rent Risk' if rents seem aggressive. NO LIQUIDITY MENTIONS."],
       "deepDiveAreas": ["Items that need more scrutiny"],
       "improvementChecklist": ["Practical advice to strengthen the deal"]
     }
@@ -86,7 +92,7 @@ export const analyzeDealWithAI = async (
 };
 
 const getDefaultAnalysis = (): AnalysisResult => ({
-  narrativeSummary: "Quantitative metrics are being reviewed against local market conditions.",
+  narrativeSummary: "Quantitative metrics are being reviewed against local market conditions. Calculations assume a 7.00% baseline rate; submit for final pricing.",
   whatsWorking: ["Asset type aligns with current portfolio targets"],
   redFlags: ["Valuation consistency must be verified"],
   deepDiveAreas: ["Local market vacancy rates"],

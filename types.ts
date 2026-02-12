@@ -1,3 +1,4 @@
+
 export enum AssetType {
   SINGLE = 'Single Property',
   TWO_UNIT = '2 Units',
@@ -25,6 +26,30 @@ export interface SensitivityAnalysis {
   ltvForDscr1: number | null;
 }
 
+export interface PricingBreakdown {
+  transactionType: string;
+  ltvLabel: string;
+  ficoRange: string;
+  propertyTypeLabel: string;
+  loanTier: string;
+  dscrRange: string;
+  prepayLabel: string;
+  adj1: number | string;
+  adj2: number | string;
+  adj3: number | string;
+  adj4: number | string;
+  adj5: number | string;
+  totalAdj: number | string;
+  initialPrice: number | string;
+  closestMatchPrice: number | string;
+  initialRate: number | string;
+  shiftedPrice: number | string;
+  finalMatchPrice: number | string;
+  finalRate: number | string;
+  isOffered: boolean;
+  requiresManualRateReview?: boolean;
+}
+
 export interface LoanRequest {
   borrowerName?: string;
   borrowerEmail?: string;
@@ -41,16 +66,17 @@ export interface LoanRequest {
   purchasePrice?: number;
   asIsValue: number;
   monthlyRent: number;
-  monthlyTax: number;
+  annualTax: number;
   monthlyHoa: number;
-  monthlyInsurance: number;
+  annualInsurance: number;
   ficoScore: number;
   mortgageLates: boolean;
-  liquidity: number;
+  liquidity?: number;
   isFirstTimeInvestor: boolean;
   isShortTermRental: boolean;
   payoffAmount?: number;
   isForeignNational: boolean;
+  prepaymentPenalty: string;
 }
 
 export interface UnderwritingResult {
@@ -70,4 +96,6 @@ export interface UnderwritingResult {
   ioEligible: boolean;
   sensitivity: SensitivityAnalysis;
   estimatedCashOut?: number;
+  pricingBreakdown?: PricingBreakdown;
+  finalInterestRate?: number;
 }

@@ -1,19 +1,24 @@
 
 import { LoanRequest, UnderwritingResult, LoanPurpose, AssetType } from "../types";
+import { calculateQuotedRate } from "./pricing";
 
-const CALC_RATE = 0.07; // 7% calculation rate for underwriting purposes
 const AMORT_MONTHS = 360;
+const BASELINE_FEEDBACK_RATE = 7.0; // Hardcoded 7% for the initial feedback page
 
-const calculatePI = (loanAmount: number, annualRate: number): number => {
-  const monthlyRate = annualRate / 12;
+const calculateAmortizedPI = (loanAmount: number, annualRate: number): number => {
+  const monthlyRate = annualRate / 100 / 12;
   return (loanAmount * monthlyRate) / (1 - Math.pow(1 + monthlyRate, -AMORT_MONTHS));
+};
+
+const calculateInterestOnly = (loanAmount: number, annualRate: number): number => {
+  return (loanAmount * (annualRate / 100)) / 12;
 };
 
 export const calculateDSCRUnderwriting = (data: LoanRequest): UnderwritingResult => {
   const failures: string[] = [];
   const warnings: string[] = [];
   
-  const effectiveFico = (data.isForeignNational && !data.ficoScore) ? 700 : (data.ficoScore || 0);
+  const effectiveFico = (data.isForeignNational && (!data.ficoScore || data.ficoScore === 0)) ? 700 : (data.ficoScore || 0);
   const isMultiUnit = [AssetType.TWO_UNIT, AssetType.THREE_UNIT, AssetType.FOUR_UNIT].includes(data.assetType);
 
   // 1. Initial State/Geographic Declines
@@ -29,135 +34,97 @@ export const calculateDSCRUnderwriting = (data: LoanRequest): UnderwritingResult
     failures.push("Minimum FICO of 660 required.");
   }
 
-  // Helper to get DSCR and PI for a specific LTV
-  const getMetrics = (ltv: number) => {
-    const loanAmt = data.asIsValue * ltv;
-    const pi = calculatePI(loanAmt, CALC_RATE);
-    const totalExp = pi + data.monthlyTax + data.monthlyInsurance + data.monthlyHoa;
-    const dscr = data.monthlyRent / totalExp;
-    return { dscr, totalExp, pi, loanAmt };
-  };
-
-  // 2. Determine Max Base LTV (Matrix)
   let baseMaxLtv = 0;
   if (effectiveFico >= 780) baseMaxLtv = 0.80;
   else if (effectiveFico >= 700) baseMaxLtv = 0.75;
   else if (effectiveFico >= 680) baseMaxLtv = 0.70;
-  else if (effectiveFico >= 660) {
-    // Default base for 660-679 is 65%
-    baseMaxLtv = 0.65;
-    
-    // Check for special tier: $150k - $1.5MM, DSCR >= 1.00
-    // We check eligibility at the higher target LTVs
-    const targetLtv = data.loanPurpose === LoanPurpose.PURCHASE 
-      ? (isMultiUnit ? 0.70 : 0.75) 
-      : 0.70;
-      
-    const testMetrics = getMetrics(targetLtv);
-    const inLoanRange = testMetrics.loanAmt >= 150000 && testMetrics.loanAmt <= 1500000;
-    
-    if (testMetrics.dscr >= 1.0 && inLoanRange) {
-      baseMaxLtv = targetLtv;
-    }
-  }
+  else baseMaxLtv = 0.65;
 
-  let currentLtv = baseMaxLtv;
-  let metrics = getMetrics(currentLtv);
-
-  // 3. Apply Cash-Out Rules
+  let maxAllowedLtv = baseMaxLtv;
   const isCashOut = data.loanPurpose === LoanPurpose.REFI && data.isCashOut;
+  const isRateAndTerm = data.loanPurpose === LoanPurpose.REFI && !data.isCashOut;
+
   if (isCashOut) {
-    let cashOutLtvCap = 0.75;
-    if (data.isShortTermRental || metrics.dscr < 1.0) {
-      cashOutLtvCap = 0.70;
-    }
-    
-    // For 660-679 specifically, Cash Out is capped at 70% as per user requirements
-    if (effectiveFico >= 660 && effectiveFico <= 679) {
-      cashOutLtvCap = 0.70;
-    }
-
-    currentLtv = Math.min(currentLtv, cashOutLtvCap);
-    metrics = getMetrics(currentLtv);
-
-    let cashDollarCap = 500000;
-    if (metrics.dscr >= 1.0 && !data.isShortTermRental) {
-      if (currentLtv < 0.65) {
-        cashDollarCap = 1000000;
-      }
-    }
-
-    const currentPayoff = data.payoffAmount || 0;
-    const maxLoanByDollarCap = currentPayoff + cashDollarCap;
-    
-    if (metrics.loanAmt > maxLoanByDollarCap) {
-      currentLtv = maxLoanByDollarCap / data.asIsValue;
-      metrics = getMetrics(currentLtv);
-      warnings.push(`Proceeds Cap: Cash-out restricted to $${(cashDollarCap/1000).toLocaleString()}k max.`);
-    }
+    maxAllowedLtv = Math.min(maxAllowedLtv, 0.75);
+    if (data.isShortTermRental) maxAllowedLtv = Math.min(maxAllowedLtv, 0.70);
   }
 
-  // 4. Reserve Requirements (6 or 12 months)
+  // Calculate Requested Loan Amount
+  let requestedLoanAmt = 0;
+  const ltvCap = data.asIsValue * maxAllowedLtv;
+
+  if (data.loanPurpose === LoanPurpose.PURCHASE) {
+    requestedLoanAmt = (data.purchasePrice || data.asIsValue) * maxAllowedLtv;
+  } else if (isCashOut) {
+    requestedLoanAmt = ltvCap; // For cash out, assume they want the max
+  } else if (isRateAndTerm) {
+    // Loan amount is payoff + 2% of loan (L = P + 0.02L => 0.98L = P => L = P/0.98)
+    // Capped by LTV threshold
+    const targetLoan = (data.payoffAmount || 0) / 0.98;
+    requestedLoanAmt = Math.min(targetLoan, ltvCap);
+  } else {
+    requestedLoanAmt = ltvCap;
+  }
+
+  const effectiveLtv = requestedLoanAmt / data.asIsValue;
+
+  const getMetrics = (loanAmt: number, rate: number) => {
+    const interestOnly = calculateInterestOnly(loanAmt, rate);
+    const monthlyTax = (data.annualTax || 0) / 12;
+    const monthlyInsurance = (data.annualInsurance || 0) / 12;
+    const totalExp = interestOnly + monthlyTax + monthlyInsurance + data.monthlyHoa;
+    const dscr = data.monthlyRent / totalExp;
+    return { dscr, totalExp, pi: interestOnly, loanAmt };
+  };
+
+  const baselineMetrics = getMetrics(requestedLoanAmt, BASELINE_FEEDBACK_RATE);
+  
+  const pricing = calculateQuotedRate(data, effectiveLtv, baselineMetrics.dscr);
+
+  if (!pricing.isOffered) {
+    failures.push("This loan configuration is not offered.");
+    return {
+      score: 30, band: 'Red', qualified: false, dscr: 0, ltv: 0, reserves: 0, requiredReserves: 0, reserveMonths: 0,
+      totalMonthlyPayment: 0, monthlyPI: 0, reasoning: "Configuration not offered.", 
+      analysis: { narrativeSummary: '', whatsWorking: [], redFlags: [], deepDiveAreas: [], improvementChecklist: [] },
+      documentChecklist: [], ioEligible: false, sensitivity: { baseDscr: 0, rateForDscr1: null, ltvForDscr1: null },
+      pricingBreakdown: pricing
+    };
+  }
+
+  // Reserves logic
   let requiredMonths = 6;
-  if (metrics.dscr < 1.0) {
-    requiredMonths = 12;
-  } else if (metrics.loanAmt > 2000000) {
-    requiredMonths = 12;
-  } else if (data.isShortTermRental && metrics.loanAmt > 2000000) {
+  if (baselineMetrics.dscr < 1.0 || baselineMetrics.loanAmt > 2000000) {
     requiredMonths = 12;
   }
   
-  const requiredReserves = metrics.totalExp * requiredMonths;
-  if (data.liquidity < requiredReserves) {
-    warnings.push(`Liquidity: $${Math.round(requiredReserves - data.liquidity).toLocaleString()} reserve shortfall.`);
-  }
+  const requiredReserves = baselineMetrics.totalExp * requiredMonths;
 
-  // 5. Sensitivity Calculation (LTV for DSCR 1.00)
-  let ltvForDscr1: number | null = null;
-  if (metrics.dscr >= 0.8 && metrics.dscr < 1.0) {
-    const fixedExpenses = data.monthlyTax + data.monthlyInsurance + data.monthlyHoa;
-    const targetPI = data.monthlyRent - fixedExpenses;
-    
-    if (targetPI > 0) {
-      const monthlyRate = CALC_RATE / 12;
-      const factor = (1 - Math.pow(1 + monthlyRate, -AMORT_MONTHS)) / monthlyRate;
-      const maxLoanForDscr1 = targetPI * factor;
-      ltvForDscr1 = maxLoanForDscr1 / data.asIsValue;
-    } else {
-      ltvForDscr1 = 0;
-    }
-  }
-
-  // 6. Final Floor Checks
-  if (metrics.dscr < 0.75) {
+  if (baselineMetrics.dscr < 0.75) {
     failures.push("DSCR below 0.75x floor.");
-    currentLtv = 0;
   }
 
   let band: 'Green' | 'Yellow' | 'Red' = 'Green';
   if (failures.length > 0) band = 'Red';
-  else if (warnings.length > 0 || metrics.dscr < 1.1) band = 'Yellow';
+  else if (warnings.length > 0 || baselineMetrics.dscr < 1.1) band = 'Yellow';
 
   return {
     score: band === 'Red' ? 30 : (band === 'Yellow' ? 75 : 95),
     band,
     qualified: band !== 'Red',
-    dscr: metrics.dscr,
-    ltv: currentLtv,
-    reserves: data.liquidity,
+    dscr: baselineMetrics.dscr,
+    ltv: effectiveLtv,
+    reserves: data.liquidity || 0,
     requiredReserves,
     reserveMonths: requiredMonths,
-    totalMonthlyPayment: metrics.totalExp,
-    monthlyPI: metrics.pi,
+    totalMonthlyPayment: baselineMetrics.totalExp,
+    monthlyPI: baselineMetrics.pi,
     reasoning: [...failures, ...warnings].join(" "),
-    ioEligible: effectiveFico >= 780 && metrics.dscr >= 1.0,
+    ioEligible: effectiveFico >= 780 && baselineMetrics.dscr >= 1.0,
     documentChecklist: [],
     analysis: { narrativeSummary: '', whatsWorking: [], redFlags: [], deepDiveAreas: [], improvementChecklist: [] },
-    sensitivity: { 
-      baseDscr: metrics.dscr, 
-      rateForDscr1: null, 
-      ltvForDscr1 
-    },
-    estimatedCashOut: isCashOut ? Math.max(0, metrics.loanAmt - (data.payoffAmount || 0) - (metrics.loanAmt * 0.02)) : 0
+    sensitivity: { baseDscr: baselineMetrics.dscr, rateForDscr1: null, ltvForDscr1: null },
+    estimatedCashOut: isCashOut ? Math.max(0, baselineMetrics.loanAmt - (data.payoffAmount || 0) - (baselineMetrics.loanAmt * 0.02)) : 0,
+    pricingBreakdown: pricing,
   };
 };
