@@ -10,7 +10,7 @@ export const analyzeDealWithAI = async (
   dscr: number,
   totalMonthlyPayment: number
 ): Promise<AnalysisResult> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: mport.meta.env.VITE_API_KEY });
   
   const loanAmount = request.asIsValue * ltv;
 
